@@ -1,9 +1,10 @@
 #!/usr/bin/env bun
-import { rmSync } from 'node:fs'
+import { existsSync, rmSync } from 'node:fs'
 import { OAuthClient } from '@imogen/sdk'
 import { beginBridgeAuthorization } from './authorize.ts'
 import { runBridge } from './bridge.ts'
-import { credentialsPath, readCredentials, writeCredentials } from './credentials.ts'
+import { type Credentials, credentialsPath, readCredentials, writeCredentials } from './credentials.ts'
+import { startMcpHost } from './host.ts'
 
 const USAGE = `imogen-mcp — connect a local AI agent to your imogen photo library
 
@@ -11,6 +12,8 @@ const USAGE = `imogen-mcp — connect a local AI agent to your imogen photo libr
   imogen-mcp logout                 Forget the saved session
   imogen-mcp status                 Show which library is connected
   imogen-mcp                        Run the MCP bridge on stdio
+  imogen-mcp host --cert <path> --key <path>
+                                    Listen for MCP over HTTPS (--port 8443, --hostname 127.0.0.1)
 
 Add to an MCP client's configuration:
 
@@ -36,6 +39,9 @@ switch (command) {
   case 'status':
     status()
     break
+  case 'host':
+    await host(rest)
+    break
   case '--help':
   case '-h':
   case 'help':
@@ -47,12 +53,68 @@ switch (command) {
 }
 
 async function bridge() {
+  await runBridge(requireCredentials())
+}
+
+async function host(args: string[]) {
+  const cert = flag(args, '--cert')
+  const key = flag(args, '--key')
+  if (!cert || !key) {
+    process.stderr.write(
+      'A certificate and a key are required.\nExample: imogen-mcp host --cert <path> --key <path>\n',
+    )
+    process.exit(1)
+  }
+  if (!existsSync(cert)) {
+    process.stderr.write(`No certificate at ${cert}\n`)
+    process.exit(1)
+  }
+  if (!existsSync(key)) {
+    process.stderr.write(`No key at ${key}\n`)
+    process.exit(1)
+  }
+
+  const hostname = flag(args, '--hostname') ?? '127.0.0.1'
+  const port = parsePort(flag(args, '--port'))
+  const server = startMcpHost({
+    credentials: requireCredentials(),
+    cert: Bun.file(cert),
+    key: Bun.file(key),
+    port,
+    hostname,
+  })
+  process.stderr.write(`Listening for MCP at https://${hostname}:${server.port}/mcp\n`)
+  await new Promise(() => {})
+}
+
+function requireCredentials(): Credentials {
   const credentials = readCredentials()
   if (!credentials) {
     process.stderr.write('Not connected to a library. Run: imogen-mcp login --server <url>\n')
     process.exit(1)
   }
-  await runBridge(credentials)
+  return credentials
+}
+
+/** The value of a `--name value` flag, or undefined when the flag was not given. */
+function flag(args: string[], name: string): string | undefined {
+  const index = args.indexOf(name)
+  if (index < 0) return undefined
+  const value = args[index + 1]
+  if (value === undefined || value.startsWith('--')) {
+    process.stderr.write(`${name} needs a value.\n`)
+    process.exit(1)
+  }
+  return value
+}
+
+function parsePort(value: string | undefined): number {
+  if (value === undefined) return 8443
+  if (!/^\d+$/.test(value) || Number(value) > 65535) {
+    process.stderr.write('--port must be a number between 0 and 65535.\n')
+    process.exit(1)
+  }
+  return Number(value)
 }
 
 /**

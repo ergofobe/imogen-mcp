@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { replyTo } from './bridge.ts'
+import { forwardMessage, replyTo } from './bridge.ts'
+import type { Credentials } from './credentials.ts'
 
 const json = (body: unknown, status: number) =>
   new Response(JSON.stringify(body), {
@@ -78,5 +79,54 @@ describe('deciding what to write back for a forwarded message', () => {
     const reply = (await replyTo({ id: 4 }, json(body, 400))) as { error: { data: string } }
 
     expect(reply.error.data).toContain('not valid JSON')
+  })
+})
+
+describe('forwarding a message to the library', () => {
+  const credentials: Credentials = {
+    server: 'https://photos.example.com',
+    clientId: 'client',
+    tokens: {
+      access_token: 'fake-token',
+      token_type: 'Bearer',
+      expires_in: 3600,
+      scope: 'library:read',
+      obtainedAt: Date.now(),
+    },
+  }
+
+  test('posts it to /mcp with the bearer token and returns the reply', async () => {
+    const original = globalThis.fetch
+    let seen: { url: string; init: RequestInit } | undefined
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      seen = { url: String(input), init: init ?? {} }
+      return json({ jsonrpc: '2.0', id: 1, result: { tools: [] } }, 200)
+    }) as typeof fetch
+    try {
+      const reply = await forwardMessage(credentials, { id: 1, method: 'tools/list' })
+
+      expect(seen?.url).toBe('https://photos.example.com/mcp')
+      expect(seen?.init.method).toBe('POST')
+      const headers = seen?.init.headers as Record<string, string>
+      expect(headers.Authorization).toBe('Bearer fake-token')
+      expect(headers['Content-Type']).toBe('application/json')
+      expect(headers.Accept).toBe('application/json')
+      expect(JSON.parse(String(seen?.init.body))).toEqual({ id: 1, method: 'tools/list' })
+      expect(reply).toEqual({ jsonrpc: '2.0', id: 1, result: { tools: [] } })
+    } finally {
+      globalThis.fetch = original
+    }
+  })
+
+  test('stays silent when forwarding a notification throws', async () => {
+    const original = globalThis.fetch
+    globalThis.fetch = (async () => {
+      throw new Error('offline')
+    }) as typeof fetch
+    try {
+      expect(await forwardMessage(credentials, { method: 'notifications/initialized' })).toBeUndefined()
+    } finally {
+      globalThis.fetch = original
+    }
   })
 })

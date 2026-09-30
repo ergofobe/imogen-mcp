@@ -10,35 +10,13 @@ import { type Credentials, currentAccessToken } from './credentials.ts'
  * so a long conversation never fails because an hour elapsed.
  */
 export async function runBridge(credentials: Credentials): Promise<void> {
-  const endpoint = `${credentials.server}/mcp`
-
   const send = (message: unknown) => {
     process.stdout.write(`${JSON.stringify(message)}\n`)
   }
 
   const forward = async (message: { id?: unknown; method?: string }) => {
-    try {
-      const token = await currentAccessToken(credentials)
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(message),
-      })
-
-      const reply = await replyTo(message, response)
-      if (reply !== undefined) send(reply)
-    } catch (error) {
-      if (message.id === undefined || message.id === null) return
-      send({
-        jsonrpc: '2.0',
-        id: message.id,
-        error: { code: -32603, message: (error as Error).message },
-      })
-    }
+    const reply = await forwardMessage(credentials, message)
+    if (reply !== undefined) send(reply)
   }
 
   const decoder = new TextDecoder()
@@ -72,6 +50,38 @@ export async function runBridge(credentials: Credentials): Promise<void> {
 
       // Deliberately not awaited: a slow tool call must not block the next message.
       void forward(message)
+    }
+  }
+}
+
+/**
+ * Forwards one JSON-RPC message to the library and returns what the caller should
+ * answer with, or `undefined` when the message was a notification.
+ *
+ * Shared by the stdio loop and the HTTPS host so the two front doors cannot drift.
+ */
+export async function forwardMessage(
+  credentials: Credentials,
+  message: { id?: unknown; method?: string },
+): Promise<unknown> {
+  try {
+    const token = await currentAccessToken(credentials)
+    const response = await fetch(`${credentials.server}/mcp`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(message),
+    })
+    return await replyTo(message, response)
+  } catch (error) {
+    if (message.id === undefined || message.id === null) return
+    return {
+      jsonrpc: '2.0',
+      id: message.id,
+      error: { code: -32603, message: (error as Error).message },
     }
   }
 }
