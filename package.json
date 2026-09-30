@@ -19,5 +19,9 @@
   "dependencies": {
     "@imogen/sdk": "file:imogen-sdk/typescript/packages/sdk",
     "@imogen/shared": "file:imogen-sdk/typescript/packages/shared"
+  },
+  "overrides": {
+    "@imogen/shared": "file:imogen-sdk/typescript/packages/shared",
+    "@imogen/sdk": "file:imogen-sdk/typescript/packages/sdk"
   }
 }

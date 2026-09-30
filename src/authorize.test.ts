@@ -46,7 +46,17 @@ const stubServer = (): Stub => {
     }
     if (url.endsWith('/oauth/register')) {
       registration = JSON.parse(String(init?.body)) as Record<string, unknown>
-      return json({ client_id: 'CLIENT' })
+      return json({
+        client_id: 'CLIENT',
+        client_id_issued_at: 1_700_000_000,
+        // 0 means the secret does not expire (RFC 7591); this public client has none.
+        client_secret_expires_at: 0,
+        redirect_uris: [REDIRECT_URI],
+        grant_types: ['authorization_code', 'refresh_token'],
+        response_types: ['code'],
+        token_endpoint_auth_method: 'none',
+        scope: DEFAULT_SCOPES,
+      })
     }
     throw new Error(`unexpected request: ${url}`)
   }
