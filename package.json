@@ -14,7 +14,7 @@
   ],
   "scripts": {
     "build": "echo no build step",
-    "test": "bun test"
+    "test": "bun test ./src/"
   },
   "dependencies": {
     "@imogen/sdk": "file:imogen-sdk/typescript/packages/sdk",
